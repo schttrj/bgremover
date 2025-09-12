@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+rembg
+onnxruntime            # CPU default (swap to onnxruntime-gpu if you want CUDA)
+pillow
+httpx
+python-multipart
+opencv-python-headless
+opencv-contrib-python-headless

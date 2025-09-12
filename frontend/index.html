@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Background Remover</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>AI Background Remover</h1>
+            <p>Upload an image to automatically remove the background, then refine with custom brushes</p>
+        </header>
+
+        <main>
+            <!-- Upload Section -->
+            <section class="upload-section">
+                <div class="upload-area" id="uploadArea">
+                    <div class="upload-content">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                            <polyline points="7,10 12,15 17,10"></polyline>
+                            <line x1="12" y1="15" x2="12" y2="3"></line>
+                        </svg>
+                        <h3>Drop image here or click to browse</h3>
+                        <p>Supports JPG, PNG, WebP formats (max 10MB)</p>
+                    </div>
+                    <input type="file" id="fileInput" accept="image/*" hidden>
+                </div>
+                <div class="loading-spinner" id="loadingSpinner" style="display: none;">
+                    <div class="spinner-container">
+                        <div class="spinner"></div>
+                        <div class="processing-text">Processing your image...</div>
+                        <div class="processing-steps">
+                            <div class="step" id="step1">📤 Uploading image to server</div>
+                            <div class="step" id="step2">🤖 AI analyzing image content</div>
+                            <div class="step" id="step3">✂️ Removing background</div>
+                            <div class="step" id="step4">✨ Refining edges</div>
+                            <div class="step" id="step5">📥 Preparing result</div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Editor Section -->
+            <section class="editor-section" id="editorSection" style="display: none;">
+                <!-- Toolbar -->
+                <div class="toolbar">
+                    <div class="tool-group">
+                        <button class="tool-btn" id="greenBrush" data-tool="green">
+                            <div class="brush-icon green"></div>
+                            Keep (Add to foreground)
+                        </button>
+                        <button class="tool-btn active" id="redBrush" data-tool="red">
+                            <div class="brush-icon red"></div>
+                            Remove (Add to background)
+                        </button>
+                        <button class="tool-btn" id="magicWand" data-tool="magic">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M15 4V2M15 16v-2M8 9h2M20 9h2M17.8 11.8L19 13M17.8 6.2L19 5M12.2 11.8L11 13M12.2 6.2L11 5"/>
+                                <path d="M3 21l9-9M12.2 12.2l5.6 5.6"/>
+                            </svg>
+                            Magic Select
+                        </button>
+                    </div>
+                    
+                    <div class="tool-group" id="brushControls">
+                        <label for="brushSize">Brush Size:</label>
+                        <input type="range" id="brushSize" min="5" max="100" value="20">
+                        <span id="brushSizeValue">20</span>
+                    </div>
+                    
+                    <div class="tool-group" id="magicControls" style="display: none;">
+                        <label for="tolerance">Tolerance:</label>
+                        <input type="range" id="tolerance" min="5" max="100" value="30">
+                        <span id="toleranceValue">30</span>
+                    </div>
+                    
+                    <div class="tool-group">
+                        <button class="tool-btn" id="undoBtn">↶ Undo</button>
+                        <button class="tool-btn" id="redoBtn">↷ Redo</button>
+                        <button class="tool-btn" id="resetBtn">⟲ Reset</button>
+                    </div>
+                </div>
+
+                <!-- Canvas Container -->
+                <div class="canvas-container">
+                    <div class="canvas-wrapper" id="canvasWrapper">
+                        <canvas id="mainCanvas"></canvas>
+                        <canvas id="overlayCanvas"></canvas>
+                        <div class="brush-cursor" id="brushCursor"></div>
+                    </div>
+                </div>
+
+                <!-- Controls -->
+                <div class="controls">
+                    <button class="btn-primary" id="downloadBtn">Download Result</button>
+                    <button class="btn-secondary" id="newImageBtn">Upload New Image</button>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
