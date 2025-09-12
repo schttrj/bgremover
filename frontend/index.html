@@ -11,6 +11,9 @@
         <header>
             <h1>AI Background Remover</h1>
             <p>Upload an image to automatically remove the background, then refine with custom brushes</p>
+            <div class="hosted-badge">
+                <a href="https://tiiny.host" target="_blank" rel="noopener">Hosted on <strong>Tiiny&nbsp;Host</strong></a>
+            </div>
         </header>
 
         <main>
@@ -50,11 +53,18 @@
                     <div class="tool-group">
                         <button class="tool-btn" id="greenBrush" data-tool="green">
                             <div class="brush-icon green"></div>
-                            Keep (Add to foreground)
+                            <div class="label">
+                                <span class="title">Keep</span>
+                                <span class="hint">Add to foreground</span>
+                            </div>
                         </button>
+                        
                         <button class="tool-btn active" id="redBrush" data-tool="red">
                             <div class="brush-icon red"></div>
-                            Remove (Add to background)
+                            <div class="label">
+                                <span class="title">Remove</span>
+                                <span class="hint">Add to background</span>
+                            </div>
                         </button>
                         <button class="tool-btn" id="magicWand" data-tool="magic">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -75,6 +85,18 @@
                         <label for="tolerance">Tolerance:</label>
                         <input type="range" id="tolerance" min="5" max="100" value="30">
                         <span id="toleranceValue">30</span>
+                    </div>
+
+                    <!-- Pan tool -->
+                    <div class="tool-group">
+                        <button class="tool-btn" id="handTool" data-tool="hand">✋ Pan</button>
+                    </div>
+                    
+                    <!-- Zoom controls -->
+                    <div class="tool-group" id="zoomControls">
+                        <button class="tool-btn" id="zoomOutBtn">−</button>
+                        <span id="zoomLabel">100%</span>
+                        <button class="tool-btn" id="zoomInBtn">＋</button>
                     </div>
                     
                     <div class="tool-group">

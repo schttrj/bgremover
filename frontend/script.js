@@ -15,6 +15,14 @@ class BackgroundRemover {
     this.apiBaseUrl = "https://phraai.com/bgremover";
     this.processingSteps = ["step1", "step2", "step3", "step4", "step5"];
     this.currentStep = 0;
+    this.zoom = 1;
+    this.minZoom = 0.25;
+    this.maxZoom = 8;
+    this.isPanning = false;
+    this.panStartX = 0;
+    this.panStartY = 0;
+    this.scrollStartLeft = 0;
+    this.scrollStartTop = 0;
 
     this.initializeElements();
     this.setupEventListeners();
@@ -29,6 +37,11 @@ class BackgroundRemover {
     this.overlayCanvas = document.getElementById("overlayCanvas");
     this.canvasWrapper = document.getElementById("canvasWrapper");
     this.brushCursor = document.getElementById("brushCursor");
+    this.canvasContainer = document.querySelector(".canvas-container");
+    this.handTool = document.getElementById("handTool");
+    this.zoomInBtn = document.getElementById("zoomInBtn");
+    this.zoomOutBtn = document.getElementById("zoomOutBtn");
+    this.zoomLabel = document.getElementById("zoomLabel");
 
     // Tools
     this.greenBrush = document.getElementById("greenBrush");
@@ -75,6 +88,7 @@ class BackgroundRemover {
     this.greenBrush.addEventListener("click", () => this.setTool("green"));
     this.redBrush.addEventListener("click", () => this.setTool("red"));
     this.magicWand.addEventListener("click", () => this.setTool("magic"));
+    this.handTool.addEventListener("click", () => this.setTool("hand"));
 
     // Brush size and tolerance
     this.brushSizeSlider.addEventListener(
@@ -85,6 +99,10 @@ class BackgroundRemover {
       "input",
       this.updateTolerance.bind(this)
     );
+
+    // Zoom buttons
+    this.zoomInBtn.addEventListener("click", () => this.zoomBy(1.25));
+    this.zoomOutBtn.addEventListener("click", () => this.zoomBy(1 / 1.25));
 
     // History controls
     this.undoBtn.addEventListener("click", this.undo.bind(this));
@@ -178,31 +196,25 @@ class BackgroundRemover {
 
     // Reset all steps first
     this.processingSteps.forEach((stepId) => {
-      const element = document.getElementById(stepId);
-      if (element) {
-        element.classList.remove("active");
-      }
+      const el = document.getElementById(stepId);
+      if (el) el.classList.remove("active");
     });
 
+    const stepDelay = 500; // start delay (ms)  — increased
+    const stepDuration = 1800; // gap between steps — increased
+
     const animateStep = () => {
-      // Activate current step
       if (this.currentStep < this.processingSteps.length) {
-        const currentStepElement = document.getElementById(
+        const el = document.getElementById(
           this.processingSteps[this.currentStep]
         );
-        if (currentStepElement) {
-          currentStepElement.classList.add("active");
-          console.log(
-            `Activating step: ${this.processingSteps[this.currentStep]}`
-          ); // Debug log
-        }
+        if (el) el.classList.add("active");
         this.currentStep++;
-        setTimeout(animateStep, 1200); // Increased timing to 1.2 seconds
+        setTimeout(animateStep, stepDuration);
       }
     };
 
-    // Start the animation after a short delay
-    setTimeout(animateStep, 300);
+    setTimeout(animateStep, stepDelay);
   }
 
   async processFile(file) {
@@ -261,7 +273,6 @@ class BackgroundRemover {
     const formData = new FormData();
     formData.append("file", file);
     formData.append("model", "u2net");
-    formData.append("post_process_mask", "true");
     formData.append("fmt", "png");
 
     try {
@@ -343,6 +354,17 @@ class BackgroundRemover {
     // We'll display the processed image initially, but keep original data for mask operations
     this.ctx.clearRect(0, 0, width, height);
     this.ctx.drawImage(processedImg, 0, 0, width, height);
+    this.setZoom(1);
+    this.centerCanvasInView();
+  }
+
+  centerCanvasInView() {
+    requestAnimationFrame(() => {
+      const c = this.canvasContainer;
+      if (!c) return;
+      c.scrollLeft = Math.max(0, (c.scrollWidth - c.clientWidth) / 2);
+      c.scrollTop = Math.max(0, (c.scrollHeight - c.clientHeight) / 2);
+    });
   }
 
   generateMaskFromProcessed(processedImg) {
@@ -373,6 +395,10 @@ class BackgroundRemover {
   }
 
   handleMouseDown(e) {
+    if (this.currentTool === "hand") {
+      this.startPan(e);
+      return;
+    }
     if (this.currentTool === "magic") {
       this.magicSelect(e);
     } else {
@@ -381,12 +407,20 @@ class BackgroundRemover {
   }
 
   handleMouseMove(e) {
+    if (this.currentTool === "hand") {
+      this.panMove(e);
+      return;
+    }
     if (this.currentTool !== "magic") {
       this.draw(e);
     }
   }
 
   handleMouseUp(e) {
+    if (this.currentTool === "hand") {
+      this.endPan();
+      return;
+    }
     if (this.currentTool !== "magic") {
       this.stopDrawing();
     }
@@ -482,6 +516,68 @@ class BackgroundRemover {
 
     this.applyMask();
     this.saveState();
+  }
+
+  startPan(e) {
+    this.isPanning = true;
+    this.canvasContainer.classList.add("dragging");
+    this.mainCanvas.style.cursor = "grabbing";
+    this.panStartX = e.clientX;
+    this.panStartY = e.clientY;
+    this.scrollStartLeft = this.canvasContainer.scrollLeft;
+    this.scrollStartTop = this.canvasContainer.scrollTop;
+  }
+
+  panMove(e) {
+    if (!this.isPanning) return;
+    const dx = e.clientX - this.panStartX;
+    const dy = e.clientY - this.panStartY;
+    this.canvasContainer.scrollLeft = this.scrollStartLeft - dx;
+    this.canvasContainer.scrollTop = this.scrollStartTop - dy;
+  }
+
+  endPan() {
+    this.isPanning = false;
+    this.canvasContainer.classList.remove("dragging");
+    this.mainCanvas.style.cursor = "grab";
+  }
+
+  zoomBy(factor) {
+    this.setZoom(this.zoom * factor);
+  }
+
+  setZoom(nextZoom) {
+    const prev = this.zoom || 1;
+    this.zoom = Math.min(
+      this.maxZoom || 8,
+      Math.max(this.minZoom || 0.25, nextZoom)
+    );
+
+    // Resize BOTH canvases via inline CSS (not attributes)
+    const displayW = Math.round(this.mainCanvas.width * this.zoom);
+    const displayH = Math.round(this.mainCanvas.height * this.zoom);
+    this.mainCanvas.style.width = displayW + "px";
+    this.mainCanvas.style.height = displayH + "px";
+    this.overlayCanvas.style.width = displayW + "px";
+    this.overlayCanvas.style.height = displayH + "px";
+
+    // Keep viewport centered on the same spot
+    const c = this.canvasContainer; // document.querySelector('.canvas-container')
+    const cx = c.scrollLeft + c.clientWidth / 2;
+    const cy = c.scrollTop + c.clientHeight / 2;
+    const scale = this.zoom / prev;
+    c.scrollLeft = Math.max(0, cx * scale - c.clientWidth / 2);
+    c.scrollTop = Math.max(0, cy * scale - c.clientHeight / 2);
+
+    // Keep the visible brush ring in sync with zoom
+    if (this.brushCursor) {
+      this.brushCursor.style.width = this.brushSize * this.zoom + "px";
+      this.brushCursor.style.height = this.brushSize * this.zoom + "px";
+    }
+
+    // Update label if you have one
+    if (this.zoomLabel)
+      this.zoomLabel.textContent = Math.round(this.zoom * 100) + "%";
   }
 
   startDrawing(e) {
@@ -666,45 +762,59 @@ class BackgroundRemover {
   setTool(tool) {
     this.currentTool = tool;
 
-    // Update UI button state
+    // Update UI
     document
       .querySelectorAll(".tool-btn")
       .forEach((btn) => btn.classList.remove("active"));
 
     if (tool === "green" || tool === "red") {
-      // Activate the right brush button
       (tool === "green" ? this.greenBrush : this.redBrush).classList.add(
         "active"
       );
 
-      // Clear the inline 'display:none' set by Magic Select and color the cursor
-      this.brushCursor.style.display = "";
+      // Show brush cursor and color it
+      this.brushCursor.style.display = ""; // clear any inline 'none'
       this.brushCursor.className = `brush-cursor ${tool}`;
 
-      // Show brush controls, hide magic controls
+      // Controls
       this.brushControls.style.display = "flex";
       this.magicControls.style.display = "none";
 
-      // Make the cursor appear immediately
+      // Cursors
+      this.canvasContainer.classList.remove("hand", "dragging");
+      this.mainCanvas.style.cursor = "crosshair";
       this.showCursor();
     } else if (tool === "magic") {
       this.magicWand.classList.add("active");
 
-      // Hide brush cursor for Magic Select
+      // Hide brush cursor, show magic controls
       this.brushCursor.classList.remove("active");
       this.brushCursor.style.display = "none";
-
-      // Swap controls
       this.brushControls.style.display = "none";
       this.magicControls.style.display = "flex";
+
+      this.canvasContainer.classList.remove("hand", "dragging");
+      this.mainCanvas.style.cursor = "crosshair";
+    } else if (tool === "hand") {
+      this.handTool.classList.add("active");
+
+      // Hide brush UI/cursor
+      this.brushCursor.classList.remove("active");
+      this.brushCursor.style.display = "none";
+      this.brushControls.style.display = "none";
+      this.magicControls.style.display = "none";
+
+      // Pan cursor via container + canvas
+      this.canvasContainer.classList.add("hand");
+      this.mainCanvas.style.cursor = "grab";
     }
   }
 
   updateBrushSize() {
     this.brushSize = parseInt(this.brushSizeSlider.value);
     this.brushSizeValue.textContent = this.brushSize;
-    this.brushCursor.style.width = this.brushSize + "px";
-    this.brushCursor.style.height = this.brushSize + "px";
+    this.brushCursor.style.width = this.brushSize * this.zoom + "px";
+    this.brushCursor.style.height = this.brushSize * this.zoom + "px";
   }
 
   updateTolerance() {
@@ -713,8 +823,7 @@ class BackgroundRemover {
   }
 
   updateCursor(e) {
-    if (this.currentTool === "magic") return;
-
+    if (this.currentTool === "magic" || this.currentTool === "hand") return;
     const rect = this.canvasWrapper.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
@@ -725,8 +834,8 @@ class BackgroundRemover {
   showCursor() {
     if (this.currentTool !== "magic") {
       this.brushCursor.classList.add("active");
-      this.brushCursor.style.width = this.brushSize + "px";
-      this.brushCursor.style.height = this.brushSize + "px";
+      this.brushCursor.style.width = this.brushSize * this.zoom + "px";
+      this.brushCursor.style.height = this.brushSize * this.zoom + "px";
     }
   }
 
@@ -824,6 +933,7 @@ class BackgroundRemover {
     this.loadingSpinner.style.display = "none";
     this.uploadArea.style.display = "none";
     this.editorSection.style.display = "block";
+    this.centerCanvasInView();
   }
 }
 
