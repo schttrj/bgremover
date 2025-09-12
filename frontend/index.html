@@ -19,6 +19,26 @@
         <main>
             <!-- Upload Section -->
             <section class="upload-section">
+                <div class="upload-options preset-format-group">
+                    <div class="tool-group preset-group" id="presetControls">
+                        <label for="presetSelect">Preset:</label>
+                        <select id="presetSelect">
+                            <option value="general" selected>General (default)</option>
+                            <option value="portraits">Portraits / Hair</option>
+                            <option value="product">Product w/ Spill</option>
+                            <option value="logo">Logos / Hard Edges</option>
+                            <option value="speed">Speed Mode</option>
+                        </select>
+                    </div>
+                
+                    <div class="tool-group format-group" id="formatControls">
+                        <label for="formatSelect">Format:</label>
+                        <select id="formatSelect">
+                            <option value="png" selected>PNG</option>
+                            <option value="webp">WebP</option>
+                        </select>
+                    </div>
+                </div>
                 <div class="upload-area" id="uploadArea">
                     <div class="upload-content">
                         <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

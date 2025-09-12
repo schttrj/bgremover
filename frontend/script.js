@@ -25,7 +25,27 @@ class BackgroundRemover {
     this.scrollStartTop = 0;
 
     this.initializeElements();
+
+    // Restore last chosen preset/format (if saved)
+    const savedFmt = localStorage.getItem("fmt");
+    if (savedFmt && this.formatSelect) this.formatSelect.value = savedFmt;
+    const savedPreset = localStorage.getItem("preset");
+    if (savedPreset && this.presetSelect) this.presetSelect.value = savedPreset;
+
     this.setupEventListeners();
+
+    // Presets for /remove-pro parameters
+    this.presets = {
+      general: {},
+      portraits: { feather_sigma: "0.9", shrink_px: "0", guided: "true" },
+      product:   { shrink_px: "1", rim_px: "5", weight_power: "2.2", t_power: "0.7" },
+      logo:      { guided: "false", feather_sigma: "0.0", shrink_px: "1" },
+      speed:     { max_dim: "1600" }
+    };
+
+    // UI selects
+    this.presetSelect = document.getElementById("presetSelect");
+    this.formatSelect = document.getElementById("formatSelect");
   }
 
   initializeElements() {
@@ -42,6 +62,8 @@ class BackgroundRemover {
     this.zoomInBtn = document.getElementById("zoomInBtn");
     this.zoomOutBtn = document.getElementById("zoomOutBtn");
     this.zoomLabel = document.getElementById("zoomLabel");
+    this.presetSelect = document.getElementById("presetSelect");
+    this.formatSelect = document.getElementById("formatSelect");
 
     // Tools
     this.greenBrush = document.getElementById("greenBrush");
@@ -146,6 +168,17 @@ class BackgroundRemover {
       "mouseleave",
       this.hideCursor.bind(this)
     );
+
+    if (this.formatSelect) {
+      this.formatSelect.addEventListener("change", () => {
+        localStorage.setItem("fmt", this.formatSelect.value);
+      });
+    }
+    if (this.presetSelect) {
+      this.presetSelect.addEventListener("change", () => {
+        localStorage.setItem("preset", this.presetSelect.value);
+      });
+    }
   }
 
   handleDragEnter(e) {
@@ -272,8 +305,16 @@ class BackgroundRemover {
   async removeBackgroundAPI(file) {
     const formData = new FormData();
     formData.append("file", file);
-    formData.append("model", "u2net");
-    formData.append("fmt", "png");
+
+    const fmt = (this.formatSelect && this.formatSelect.value) ? this.formatSelect.value : "png";
+    formData.append("fmt", fmt);
+
+    // Apply selected preset params
+    const presetKey = (this.presetSelect && this.presetSelect.value) ? this.presetSelect.value : "general";
+    const cfg = this.presets[presetKey] || {};
+    for (const [k, v] of Object.entries(cfg)) {
+      formData.append(k, String(v));
+    }
 
     try {
       const response = await fetch(`${this.apiBaseUrl}/remove-pro`, {
@@ -888,9 +929,11 @@ class BackgroundRemover {
     tempCtx.drawImage(this.mainCanvas, 0, 0);
 
     // Download
+    const fmt = (this.formatSelect && this.formatSelect.value) ? this.formatSelect.value : "png";
     const link = document.createElement("a");
-    link.download = "background-removed.png";
-    link.href = tempCanvas.toDataURL("image/png");
+    link.download = `background-removed.${fmt}`;
+    const mime = fmt === "webp" ? "image/webp" : "image/png";
+    link.href = tempCanvas.toDataURL(mime);
     link.click();
   }
 
@@ -911,6 +954,8 @@ class BackgroundRemover {
     // Keep the section visible so the spinner can render
     document.querySelector(".upload-section").style.display = "block";
     this.uploadArea.style.display = "none";
+    if (this.presetSelect) this.presetSelect.disabled = true;
+    if (this.formatSelect) this.formatSelect.disabled = true;
     this.loadingSpinner.style.display = "block";
     this.editorSection.style.display = "none";
   }
@@ -918,11 +963,15 @@ class BackgroundRemover {
   hideLoading() {
     // Just stop the spinner; do NOT change which view is shown
     this.loadingSpinner.style.display = "none";
+    if (this.presetSelect) this.presetSelect.disabled = false;
+    if (this.formatSelect) this.formatSelect.disabled = false;
   }
 
   showUpload() {
     document.querySelector(".upload-section").style.display = "block";
     this.uploadArea.style.display = "block";
+    if (this.presetSelect) this.presetSelect.disabled = false;
+    if (this.formatSelect) this.formatSelect.disabled = false;
     this.loadingSpinner.style.display = "none";
     this.editorSection.style.display = "none";
   }

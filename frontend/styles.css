@@ -402,6 +402,39 @@ header p {
   display: block;
 }
 
+/* === Upload options centering + theme === */
+.preset-format-group {
+  display: flex !important;
+  flex-wrap: nowrap !important;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  max-width: 900px;
+  margin: 8px auto 12px;
+  gap: 24px;
+}
+.preset-format-group .tool-group {
+  display: inline-flex !important;
+  align-items: center;
+  background: transparent !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+.preset-format-group label {
+  color: #eef2ff;
+  font-weight: 500;
+  margin-right: 10px;
+}
+.preset-format-group select {
+  height: 38px;
+  padding: 6px 12px;
+  background: #fff;
+  color: #1f2a44;
+  border: 1px solid #d7def3;
+  border-radius: 10px;
+}
+
 /* Tiiny Host badge */
 .hosted-badge {
   display: inline-flex;
@@ -480,6 +513,10 @@ header p {
     padding: 15px;
     text-align: center;
   }
+
+  .preset-format-group label { 
+    display: none; 
+}
 
   .hosted-badge {
     padding: 5px 10px;
