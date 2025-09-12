@@ -435,48 +435,6 @@ header p {
   border-radius: 10px;
 }
 
-/* Tiiny Host badge */
-.hosted-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  font-size: 0.8rem;
-  margin-top: 10px;
-  padding: 6px 12px;
-  border-radius: 999px;
-  color: #fff;
-  background: rgba(255, 255, 255, 0.12);
-  border: 1px solid rgba(255, 255, 255, 0.28);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.06);
-  backdrop-filter: blur(4px);
-}
-
-.hosted-badge a {
-  color: #fff;
-  text-decoration: none;
-  font-weight: 700;
-  letter-spacing: 0.2px;
-}
-
-.hosted-badge a::after {
-  content: "↗";
-  margin-left: 6px;
-  opacity: 0.9;
-}
-
-/* Hover/active flair */
-.hosted-badge:hover {
-  background: rgba(255, 255, 255, 0.18);
-  border-color: rgba(255, 255, 255, 0.38);
-  transform: translateY(-1px);
-  transition: all 0.15s ease;
-}
-.hosted-badge:hover a {
-  text-shadow: 0 0 12px rgba(255, 255, 255, 0.45);
-}
-
 /* Responsive Design */
 @media (max-width: 768px) {
   .container {
@@ -514,12 +472,7 @@ header p {
     text-align: center;
   }
 
-  .preset-format-group label { 
-    display: none; 
-}
-
-  .hosted-badge {
-    padding: 5px 10px;
-    font-size: 0.75rem;
+  .preset-format-group label {
+    display: none;
   }
 }
