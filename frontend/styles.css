@@ -1,3 +1,7 @@
+:root{
+  --badge-gap: 20px; /* controls the space above the badge in both views */
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -35,11 +39,19 @@ header p {
   opacity: 0.9;
 }
 
-/* Upload Section */
-.upload-section {
-  margin-bottom: 40px;
+.upload-section,
+.editor-section{
+  margin-bottom: 0;   /* avoid differing section margins */
+  padding-bottom: 0;  /* don't add extra white space */
 }
 
+.app-footer{
+  position: relative;
+  text-align: center;                          /* centers the inline-block badge */
+  padding: var(--badge-gap) 0 env(safe-area-inset-bottom);
+}
+
+/* Upload Section */
 .upload-area {
   background: white;
   border: 3px dashed #ddd;
@@ -497,6 +509,36 @@ input[type="color"].color-chip::-moz-color-swatch {
 /* When a solid BG is chosen, override the checkerboard */
 .canvas-wrapper.bg-solid {
   background: var(--bg-solid);
+}
+
+.tiiny-badge{
+  display: inline-block;
+  font-size: 12px;
+  line-height: 1;
+  color: #444;
+  background: rgba(255,255,255,.95);
+  border: 1px solid rgba(0,0,0,.08);
+  border-radius: 999px;
+  padding: 6px 10px;
+  text-decoration: none;
+  box-shadow: 0 1px 2px rgba(0,0,0,.08);
+  backdrop-filter: saturate(1.2) blur(2px);
+}
+
+/* Sticky behavior, centered by the footer's text-align */
+.tiiny-badge.sticky{
+  position: sticky;
+  bottom: 0;           /* sticks to the bottom of the viewport */
+  margin: 0 auto;      /* ensure it's centered if text-align changes */
+}
+
+.tiiny-badge:hover{ box-shadow: 0 2px 6px rgba(0,0,0,.12); }
+@media (prefers-color-scheme: dark){
+  .tiiny-badge{
+    background: rgba(30,30,30,.9);
+    color: #ddd;
+    border-color: rgba(255,255,255,.12);
+  }
 }
 
 /* Responsive Design (general layout tweaks) */
