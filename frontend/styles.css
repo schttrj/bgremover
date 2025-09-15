@@ -106,6 +106,7 @@ header p {
   0% {
     transform: rotate(0deg);
   }
+
   100% {
     transform: rotate(360deg);
   }
@@ -144,49 +145,63 @@ header p {
   overflow: hidden;
 }
 
+/* ===== Toolbar: one row, no scrollbar; smart shrink ===== */
 .toolbar {
   display: flex;
-  flex-wrap: nowrap; /* keep one row */
+  flex-wrap: nowrap;
+  /* stay on one row */
   align-items: center;
-  justify-content: center;
-  gap: 12px; /* was 20px */
-  padding: 10px 12px; /* was 20px */
+  justify-content: flex-start;
+  /* avoid center-chop */
+  gap: clamp(6px, 1vw, 12px);
+  /* spacing shrinks as space tightens */
+  padding: 8px clamp(8px, 1vw, 12px);
   background: #f8f9fa;
   border-bottom: 1px solid #dee2e6;
-  overflow-x: auto; /* keep; we'll hide the bar just in case */
-  -ms-overflow-style: none; /* IE/Edge hides scrollbar */
-  scrollbar-width: none; /* Firefox hides scrollbar */
+  overflow-x: auto;
+  /* allow horizontal scroll if needed */
+  container-type: inline-size;
+  /* enable container queries */
 }
-.toolbar::-webkit-scrollbar {
-  display: none;
-} /* Chrome/Safari hides scrollbar */
 
 .tool-group {
   display: flex;
   align-items: center;
-  gap: 8px; /* was 10px */
-  padding: 4px; /* compact “pill” group */
+  gap: clamp(4px, 0.8vw, 8px);
+  padding: 4px;
   background: #f3f5f7;
   border-radius: 10px;
-  flex: 0 0 auto; /* don’t shrink groups weirdly */
+  flex: 0 0 auto;
+  /* prevent shrinking below content size */
   min-width: 0;
+  /* allow children to shrink */
 }
 
 .tool-btn {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 6px; /* was 8px */
-  padding: 6px 10px; /* was 8px 16px */
+  gap: clamp(4px, 0.8vw, 6px);
+  padding: clamp(4px, 0.6vw, 6px) clamp(8px, 1vw, 10px);
   border: 2px solid #ddd;
   background: #fff;
   border-radius: 8px;
   cursor: pointer;
-  font-size: 0.85rem; /* was 0.9rem */
-  transition: all 0.2s ease;
-  white-space: nowrap; /* keep labels on one line */
+  font-size: clamp(12px, 1.05vw, 13px);
+  line-height: 1.1;
+  white-space: nowrap;
+
+  /* allow shrink but prevent content overflow */
+  flex: 0 0 auto;
+  min-width: fit-content;
+  overflow: visible;
 }
 
-/* stack text inside brush buttons */
+/* internal pieces can shrink */
+.tool-btn>* {
+  min-width: 0;
+}
+
+/* stacked title/hint (Keep/Remove) */
 .tool-btn .label {
   display: flex;
   flex-direction: column;
@@ -202,29 +217,29 @@ header p {
   opacity: 0.85;
   font-size: 10px;
   margin: 2px 0 0 0;
-  color: #4b5563; /* default hint color */
-  transition: color 0.15s ease; /* smooth hover/active change */
+  color: #4b5563;
+  transition: color 0.15s ease;
 }
 
-/* When a brush button is active, make the hint white-ish */
-.tool-btn.active .hint {
-  color: rgba(255, 255, 255, 0.9);
-}
-
-/* If the active brush is hovered, make the hint dark gray */
-.tool-btn.active:hover .hint {
-  color: #ffffff; /* very dark gray */
-}
-
-/* Hover color for hint text (non-active buttons only) */
-.tool-btn:not(.active):hover .hint {
-  color: #1f2937; /* dark gray */
-}
-
-/* Button hover styling (skip active buttons) */
+/* Hover/active states (no conflict) */
 .tool-btn:not(.active):hover {
   border-color: #667eea;
   color: #667eea;
+}
+
+.tool-btn.active {
+  background: #667eea;
+  color: #fff;
+  border-color: #667eea;
+}
+
+.tool-btn.active:hover {
+  color: #fff;
+  border-color: #667eea;
+}
+
+.tool-btn.active .hint {
+  color: rgba(255, 255, 255, 0.9);
 }
 
 /* compact +/- and label */
@@ -235,24 +250,15 @@ header p {
   padding: 6px;
   justify-content: center;
 }
+
 #zoomLabel {
-  min-width: 48px;
+  min-width: 44px;
   text-align: center;
   font-variant-numeric: tabular-nums;
   font-weight: 600;
 }
 
-.tool-btn:hover {
-  border-color: #667eea;
-  color: #667eea;
-}
-
-.tool-btn.active {
-  background: #667eea;
-  color: white;
-  border-color: #667eea;
-}
-
+/* brush icons */
 .brush-icon {
   width: 16px;
   height: 16px;
@@ -270,9 +276,10 @@ header p {
   border-color: #dc3545;
 }
 
+/* sliders compress a bit sooner */
 #brushSize,
 #tolerance {
-  width: 90px;
+  width: clamp(60px, 10vw, 130px);
 }
 
 #brushSizeValue,
@@ -286,19 +293,18 @@ header p {
 .canvas-container {
   padding: 20px;
   background: #f8f9fa;
-  display: flex;
-  justify-content: center;
-  align-items: center;
+  display: block;
+  /* keep as block to allow scrolling container */
+  text-align: center;
   min-height: 400px;
   overflow: auto;
   max-height: 75vh;
-  display: block;
-  text-align: center;
 }
 
 .canvas-container.hand {
   cursor: grab;
 }
+
 .canvas-container.hand.dragging {
   cursor: grabbing;
 }
@@ -413,6 +419,7 @@ header p {
   margin: 8px auto 12px;
   gap: 24px;
 }
+
 .preset-format-group .tool-group {
   display: inline-flex !important;
   align-items: center;
@@ -421,11 +428,13 @@ header p {
   border-radius: 0 !important;
   box-shadow: none !important;
 }
+
 .preset-format-group label {
   color: #eef2ff;
   font-weight: 500;
   margin-right: 10px;
 }
+
 .preset-format-group select {
   height: 38px;
   padding: 6px 12px;
@@ -435,7 +444,62 @@ header p {
   border-radius: 10px;
 }
 
-/* Responsive Design */
+/* === BG controls tweaks === */
+#bgControls {
+  gap: 8px;
+}
+
+#bgControls .alpha-label {
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+/* Circular color swatch */
+input[type="color"].color-chip {
+  -webkit-appearance: none;
+  appearance: none;
+  border: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  padding: 0;
+  overflow: hidden;
+  box-shadow: inset 0 0 0 2px #00000022, 0 1px 2px rgba(0, 0, 0, 0.08);
+  cursor: pointer;
+}
+
+input[type="color"].color-chip::-webkit-color-swatch-wrapper {
+  padding: 0;
+  border-radius: 50%;
+}
+
+input[type="color"].color-chip::-webkit-color-swatch {
+  border: none;
+  border-radius: 50%;
+}
+
+input[type="color"].color-chip::-moz-color-swatch {
+  border: none;
+  border-radius: 50%;
+}
+
+/* Compact icon-only button */
+.tool-btn.icon-only {
+  padding: 6px;
+  min-width: 0;
+  line-height: 1;
+}
+
+.tool-btn.icon-only .icon {
+  display: block;
+}
+
+/* When a solid BG is chosen, override the checkerboard */
+.canvas-wrapper.bg-solid {
+  background: var(--bg-solid);
+}
+
+/* Responsive Design (general layout tweaks) */
 @media (max-width: 768px) {
   .container {
     padding: 15px;
@@ -449,20 +513,7 @@ header p {
     padding: 40px 20px;
   }
 
-  .toolbar {
-    flex-direction: column;
-    gap: 15px;
-    align-items: stretch;
-  }
-
-  .toolbar .hint {
-    display: none;
-  }
-
-  .tool-group {
-    justify-content: center;
-  }
-
+  /* keep toolbar single-row; no flex-direction change here */
   .controls {
     flex-direction: column;
   }

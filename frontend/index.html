@@ -57,7 +57,7 @@
                             <div class="step" id="step2">🤖 AI analyzing image content</div>
                             <div class="step" id="step3">✂️ Removing background</div>
                             <div class="step" id="step4">✨ Refining edges</div>
-                            <div class="step" id="step5">📥 Preparing result</div>
+                            <div class="step" id="step5">🔥 Preparing result</div>
                         </div>
                     </div>
                 </div>
@@ -83,12 +83,13 @@
                                 <span class="hint">Add to background</span>
                             </div>
                         </button>
-                        <button class="tool-btn" id="magicWand" data-tool="magic">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+
+                        <button class="tool-btn" id="magicWand" data-tool="magic" aria-label="Magic Select">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                                 <path d="M15 4V2M15 16v-2M8 9h2M20 9h2M17.8 11.8L19 13M17.8 6.2L19 5M12.2 11.8L11 13M12.2 6.2L11 5"/>
                                 <path d="M3 21l9-9M12.2 12.2l5.6 5.6"/>
                             </svg>
-                            Magic Select
+                            <span class="label">Magic Select</span>
                         </button>
                     </div>
                     
@@ -104,22 +105,48 @@
                         <span id="toleranceValue">30</span>
                     </div>
 
+                    <div class="tool-group" id="bgControls">
+                        <label class="label" for="bgColorInput">BG</label>
+                        <input type="color" id="bgColorInput" class="color-chip" value="#000000" aria-label="Background color" />
+                    
+                        <label for="bgAlpha" class="alpha-label">A</label>
+                        <input type="range" id="bgAlpha" min="0" max="100" value="100" title="Opacity" aria-label="Background alpha">
+                    
+                        <button class="tool-btn icon-only" id="bgClearBtn" title="Transparent background"
+                            aria-label="Make background transparent">
+                            <!-- simple checkerboard with a slash -->
+                            <svg class="icon" width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+                                <defs>
+                                    <pattern id="chk" width="4" height="4" patternUnits="userSpaceOnUse">
+                                        <rect width="4" height="4" fill="#ddd" />
+                                        <rect width="2" height="2" fill="#bbb" />
+                                        <rect x="2" y="2" width="2" height="2" fill="#bbb" />
+                                    </pattern>
+                                </defs>
+                                <rect x="1" y="1" width="16" height="16" rx="3" fill="url(#chk)" stroke="currentColor" />
+                                <path d="M3 15L15 3" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                            </svg>
+                        </button>
+                    </div>
+
                     <!-- Pan tool -->
                     <div class="tool-group">
-                        <button class="tool-btn" id="handTool" data-tool="hand">✋ Pan</button>
+                        <button class="tool-btn" id="handTool" data-tool="hand" aria-label="Pan">
+                            ✋ <span class="label">Pan</span>
+                        </button>
                     </div>
                     
                     <!-- Zoom controls -->
-                    <div class="tool-group" id="zoomControls">
-                        <button class="tool-btn" id="zoomOutBtn">−</button>
-                        <span id="zoomLabel">100%</span>
-                        <button class="tool-btn" id="zoomInBtn">＋</button>
+                    <div class="tool-group" id="zoomControls" aria-label="Zoom controls">
+                        <button class="tool-btn" id="zoomOutBtn" aria-label="Zoom out">−</button>
+                        <span id="zoomLabel" class="label">100%</span>
+                        <button class="tool-btn" id="zoomInBtn" aria-label="Zoom in">＋</button>
                     </div>
                     
                     <div class="tool-group">
-                        <button class="tool-btn" id="undoBtn">↶ Undo</button>
-                        <button class="tool-btn" id="redoBtn">↷ Redo</button>
-                        <button class="tool-btn" id="resetBtn">⟲ Reset</button>
+                        <button class="tool-btn" id="undoBtn" aria-label="Undo">↶ <span class="label">Undo</span></button>
+                        <button class="tool-btn" id="redoBtn" aria-label="Redo">↷ <span class="label">Redo</span></button>
+                        <button class="tool-btn" id="resetBtn" aria-label="Reset">⟲ <span class="label">Reset</span></button>
                     </div>
                 </div>
 

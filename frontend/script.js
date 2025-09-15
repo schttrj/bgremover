@@ -32,15 +32,32 @@ class BackgroundRemover {
     const savedPreset = localStorage.getItem("preset");
     if (savedPreset && this.presetSelect) this.presetSelect.value = savedPreset;
 
+    const savedBg = localStorage.getItem("bgColor");
+    const savedAlpha = localStorage.getItem("bgAlpha");
+
+    if (this.bgColorInput && savedBg) this.bgColorInput.value = savedBg;
+    if (this.bgAlpha && savedAlpha) {
+      const aPct = Math.round(parseFloat(savedAlpha) * 100);
+      this.bgAlpha.value = Number.isFinite(aPct) ? aPct : 100;
+    }
+
+    // Apply if either was saved
+    if (savedBg || savedAlpha) this.updateBackgroundColor();
+
     this.setupEventListeners();
 
     // Presets for /remove-pro parameters
     this.presets = {
       general: {},
       portraits: { feather_sigma: "0.9", shrink_px: "0", guided: "true" },
-      product:   { shrink_px: "1", rim_px: "5", weight_power: "2.2", t_power: "0.7" },
-      logo:      { guided: "false", feather_sigma: "0.0", shrink_px: "1" },
-      speed:     { max_dim: "1600" }
+      product: {
+        shrink_px: "1",
+        rim_px: "5",
+        weight_power: "2.2",
+        t_power: "0.7",
+      },
+      logo: { guided: "false", feather_sigma: "0.0", shrink_px: "1" },
+      speed: { max_dim: "1600" },
     };
 
     // UI selects
@@ -80,6 +97,9 @@ class BackgroundRemover {
     this.resetBtn = document.getElementById("resetBtn");
     this.downloadBtn = document.getElementById("downloadBtn");
     this.newImageBtn = document.getElementById("newImageBtn");
+    this.bgColorInput = document.getElementById("bgColorInput");
+    this.bgAlpha = document.getElementById("bgAlpha");
+    this.bgClearBtn = document.getElementById("bgClearBtn");
 
     // Get contexts
     this.ctx = this.mainCanvas.getContext("2d", { willReadFrequently: true });
@@ -111,6 +131,21 @@ class BackgroundRemover {
     this.redBrush.addEventListener("click", () => this.setTool("red"));
     this.magicWand.addEventListener("click", () => this.setTool("magic"));
     this.handTool.addEventListener("click", () => this.setTool("hand"));
+
+    // BG color UI
+    if (this.bgColorInput) {
+      this.bgColorInput.addEventListener("input", () => {
+        this.updateBackgroundColor();
+      });
+    }
+    if (this.bgAlpha)
+      this.bgAlpha.addEventListener("input", () =>
+        this.updateBackgroundColor()
+      );
+    if (this.bgClearBtn)
+      this.bgClearBtn.addEventListener("click", () =>
+        this.clearBackgroundColor()
+      );
 
     // Brush size and tolerance
     this.brushSizeSlider.addEventListener(
@@ -306,11 +341,17 @@ class BackgroundRemover {
     const formData = new FormData();
     formData.append("file", file);
 
-    const fmt = (this.formatSelect && this.formatSelect.value) ? this.formatSelect.value : "png";
+    const fmt =
+      this.formatSelect && this.formatSelect.value
+        ? this.formatSelect.value
+        : "png";
     formData.append("fmt", fmt);
 
     // Apply selected preset params
-    const presetKey = (this.presetSelect && this.presetSelect.value) ? this.presetSelect.value : "general";
+    const presetKey =
+      this.presetSelect && this.presetSelect.value
+        ? this.presetSelect.value
+        : "general";
     const cfg = this.presets[presetKey] || {};
     for (const [k, v] of Object.entries(cfg)) {
       formData.append(k, String(v));
@@ -465,6 +506,32 @@ class BackgroundRemover {
     if (this.currentTool !== "magic") {
       this.stopDrawing();
     }
+  }
+
+  updateBackgroundColor() {
+    if (!this.canvasWrapper || !this.bgColorInput) return;
+    const hex = this.bgColorInput.value; // "#rrggbb"
+    const a = this.bgAlpha
+      ? Math.min(1, Math.max(0, parseInt(this.bgAlpha.value, 10) / 100))
+      : 1;
+    const [r, g, b] = hex.match(/[0-9a-f]{2}/gi).map((h) => parseInt(h, 16));
+    const rgba = `rgba(${r}, ${g}, ${b}, ${a})`;
+    this.canvasWrapper.classList.add("bg-solid");
+    this.canvasWrapper.style.setProperty("--bg-solid", rgba);
+    localStorage.setItem("bgColor", hex);
+    localStorage.setItem("bgAlpha", String(a));
+  }
+
+  clearBackgroundColor() {
+    if (!this.canvasWrapper) return;
+    this.canvasWrapper.classList.remove("bg-solid");
+    this.canvasWrapper.style.removeProperty("--bg-solid");
+
+    if (this.bgColorInput) this.bgColorInput.value = "#ffffff";
+    if (this.bgAlpha) this.bgAlpha.value = 100;
+
+    localStorage.removeItem("bgColor");
+    localStorage.removeItem("bgAlpha"); // <-- add this
   }
 
   magicSelect(e) {
@@ -683,24 +750,23 @@ class BackgroundRemover {
   drawBrush(centerX, centerY) {
     const width = this.mainCanvas.width;
     const height = this.mainCanvas.height;
-    const radius = this.brushSize / 2;
+
+    // Make the radius integral so our loops use integer indices
+    const radius = Math.floor(this.brushSize / 2);
     const value = this.currentTool === "green" ? 255 : 0;
 
-    // Draw circular brush
-    for (
-      let y = Math.max(0, centerY - radius);
-      y < Math.min(height, centerY + radius);
-      y++
-    ) {
-      for (
-        let x = Math.max(0, centerX - radius);
-        x < Math.min(width, centerX + radius);
-        x++
-      ) {
-        const distance = Math.sqrt((x - centerX) ** 2 + (y - centerY) ** 2);
+    const x0 = Math.max(0, Math.floor(centerX - radius));
+    const x1 = Math.min(width - 1, Math.floor(centerX + radius));
+    const y0 = Math.max(0, Math.floor(centerY - radius));
+    const y1 = Math.min(height - 1, Math.floor(centerY + radius));
+
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        const dx = x - centerX;
+        const dy = y - centerY;
+        const distance = Math.sqrt(dx * dx + dy * dy);
         if (distance <= radius) {
-          const idx = y * width + x;
-          // Smooth edges
+          const idx = y * width + x; // always an integer now
           if (distance > radius - 2) {
             const blend = (radius - distance) / 2;
             this.mask[idx] = Math.round(
@@ -865,11 +931,9 @@ class BackgroundRemover {
 
   updateCursor(e) {
     if (this.currentTool === "magic" || this.currentTool === "hand") return;
-    const rect = this.canvasWrapper.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    this.brushCursor.style.left = x + "px";
-    this.brushCursor.style.top = y + "px";
+    const rect = this.mainCanvas.getBoundingClientRect();
+    this.brushCursor.style.left = e.clientX - rect.left + "px";
+    this.brushCursor.style.top = e.clientY - rect.top + "px";
   }
 
   showCursor() {
@@ -929,7 +993,10 @@ class BackgroundRemover {
     tempCtx.drawImage(this.mainCanvas, 0, 0);
 
     // Download
-    const fmt = (this.formatSelect && this.formatSelect.value) ? this.formatSelect.value : "png";
+    const fmt =
+      this.formatSelect && this.formatSelect.value
+        ? this.formatSelect.value
+        : "png";
     const link = document.createElement("a");
     link.download = `background-removed.${fmt}`;
     const mime = fmt === "webp" ? "image/webp" : "image/png";
