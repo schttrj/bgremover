@@ -7,11 +7,10 @@ import hashlib
 import logging
 from typing import Optional, Tuple
 
-import numpy as np
+import numpy as np, cv2, os, gc, hashlib, logging
 import cv2
-import httpx  # kept for parity with your UA block list
 
-from fastapi import FastAPI, File, UploadFile, HTTPException, Query, Request
+from fastapi import FastAPI, File, UploadFile, HTTPException, Query, Request, Form
 from fastapi.responses import Response, JSONResponse, PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -72,7 +71,7 @@ app.add_middleware(
 # -----------------------------------------------------------------------------
 # Middleware: Security headers + UA blocking (with API allowlist) + Timing
 # -----------------------------------------------------------------------------
-API_ALLOW = {"/remove", "/remove-pro", "/health", "/version"}
+API_ALLOW = {"/remove", "/remove-pro", "/remove-watermark", "/health", "/version"}
 
 @app.middleware("http")
 async def security_headers(request: Request, call_next):
@@ -165,6 +164,13 @@ def _hash_for_cache(raw: bytes, **kwargs) -> str:
 
 def _parse_bool(v: Optional[bool], default: bool) -> bool:
     return default if v is None else bool(v)
+
+def _method_flag(name: str):
+    name = (name or "telea").lower()
+    return cv2.INPAINT_TELEA if name == "telea" else cv2.INPAINT_NS
+
+def _have_xphoto():
+    return hasattr(cv2, "xphoto") and hasattr(cv2.xphoto, "inpaint")
 
 # --- CV helpers (kept under your original names, implementations streamlined) ---
 def _refine_alpha_with_cv2(
@@ -441,6 +447,193 @@ async def remove_pro(
     except Exception as e:
         logger.exception("Pro processing failed")
         raise HTTPException(500, f"processing failed: {e}")
+
+# -----------------------------------------------------------------------------
+# /remove-watermark : Watermark removal using OpenCV inpaint on specified region
+# -----------------------------------------------------------------------------
+@app.post("/remove-watermark", summary="Edge-safe, interior-only inpaint with edge-gated sharpening (Telea/NS/xphoto)")
+async def remove_watermark(
+    request: Request,
+    file: UploadFile = File(..., description="Image file"),
+
+    # Coords (float or int; will be rounded)
+    x1: float = Form(..., description="Top-left x"),
+    y1: float = Form(..., description="Top-left y"),
+    x2: float = Form(..., description="Bottom-right x"),
+    y2: float = Form(..., description="Bottom-right y"),
+
+    # Output
+    fmt: str = Form("png", description="png | webp"),
+
+    # Inpaint controls
+    method: str = Form("telea", description="telea | ns | xphoto_fast | xphoto_best"),
+    radius: int = Form(4, description="Telea/NS radius (px)"),
+    pad: int = Form(24, description="Edge padding (px)"),
+
+    # Blend / sharpness controls
+    feather: int = Form(3, description="Feather width (px); 0 disables"),
+    sharp_amount: float = Form(0.85, description="L-channel unsharp amount (0.5–1.5)"),
+    detail_strength: float = Form(0.25, description="Edge-preserving detail (0–0.8)"),
+    lap_boost: float = Form(0.6, description="Laplacian micro-contrast (0–1)"),
+
+    # Interior-only inpaint: shrink mask inward to preserve edge pixels (crisper borders)
+    tighten: int = Form(3, description="Shrink rect before inpaint (px)"),
+
+    # Extra crispness: local contrast + edge-gated sharpening
+    clahe_clip: float = Form(1.8, description="CLAHE clip on L (0=off; ~1.5–2.5 good)"),
+    clahe_grid: int   = Form(6,   description="CLAHE grid size (e.g., 6–8)"),
+    edge_gamma: float = Form(0.6, description="Edge gate gamma (lower=more edge boost)"),
+):
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(400, "empty file")
+
+    np_in = np.frombuffer(raw, np.uint8)
+    img = cv2.imdecode(np_in, cv2.IMREAD_COLOR)
+    if img is None:
+        raise HTTPException(400, "unsupported or corrupt image")
+
+    h, w = img.shape[:2]
+
+    # ---- sanitize & clamp coords ----
+    try:
+        xi1, yi1, xi2, yi2 = [int(round(float(v))) for v in (x1, y1, x2, y2)]
+    except Exception:
+        raise HTTPException(422, "x1,y1,x2,y2 must be numeric")
+
+    if xi1 >= xi2 or yi1 >= yi2:
+        raise HTTPException(400, "Invalid region: require x1 < x2 and y1 < y2")
+
+    xi1 = max(0, min(xi1, w - 1)); yi1 = max(0, min(yi1, h - 1))
+    xi2 = max(1, min(xi2, w));     yi2 = max(1, min(yi2, h))
+
+    # ---- edge-safe padding ----
+    p = max(0, int(pad))
+    if p > 0:
+        img_p = cv2.copyMakeBorder(img, p, p, p, p, cv2.BORDER_REFLECT_101)
+        x1p, y1p, x2p, y2p = xi1 + p, yi1 + p, xi2 + p, yi2 + p
+    else:
+        img_p = img
+        x1p, y1p, x2p, y2p = xi1, yi1, xi2, yi2
+
+    hp, wp = img_p.shape[:2]
+
+    # ---- masks (padded space) ----
+    mask_rect = np.zeros((hp, wp), np.uint8)
+    cv2.rectangle(mask_rect, (x1p, y1p), (x2p, y2p), 255, -1)
+
+    t = max(0, int(tighten))
+    if t > 0:
+        k = 2 * t + 1
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
+        mask_inpaint = cv2.erode(mask_rect, kernel, iterations=1)  # interior-only inpaint
+    else:
+        mask_inpaint = mask_rect
+
+    # ---- inpainting ----
+    m = method.lower()
+    try:
+        if m.startswith("xphoto"):
+            if not _have_xphoto():
+                raise RuntimeError("OpenCV built without xphoto module")
+            algo = cv2.xphoto.INPAINT_FSR_FAST if "fast" in m else cv2.xphoto.INPAINT_FSR_BEST
+            inpainted = np.empty_like(img_p)
+            cv2.xphoto.inpaint(img_p, mask_inpaint, inpainted, algo)
+        else:
+            r = max(1, int(radius))
+            inpainted = cv2.inpaint(img_p, mask_inpaint, r, _method_flag(m))
+    except Exception as e:
+        logger.warning(f"inpaint failed ({e}); fallback to Telea")
+        inpainted = cv2.inpaint(img_p, mask_inpaint, max(1, int(radius)), cv2.INPAINT_TELEA)
+
+    # ---- compose: replace only interior; keep edges crisp ----
+    if feather and int(feather) > 0:
+        k2 = max(1, int(feather) * 2 + 1)
+        soft = cv2.GaussianBlur(mask_inpaint, (k2, k2), 0)
+        alpha = (soft.astype(np.float32) / 255.0)[..., None]
+    else:
+        alpha = (mask_inpaint.astype(np.float32) / 255.0)[..., None]
+
+    base_p = (alpha * inpainted.astype(np.float32) + (1.0 - alpha) * img_p.astype(np.float32)).astype(np.uint8)
+
+    # ---- advanced sharpening / detail (edge-gated, applied to interior only) ----
+    # A) L-channel unsharp
+    lab = cv2.cvtColor(base_p, cv2.COLOR_BGR2LAB).astype(np.float32)
+    L, A, B = cv2.split(lab)
+    blurL = cv2.GaussianBlur(L, (0, 0), 1.1, 1.1)
+    amt = float(np.clip(sharp_amount, 0.0, 1.5))
+    Ls = cv2.addWeighted(L, 1 + amt, blurL, -amt, 0)
+    Ls = np.clip(Ls, 0, 255)
+
+    # B) Laplacian micro-contrast
+    lap_w = float(np.clip(lap_boost, 0.0, 1.0))
+    if lap_w > 0:
+        lap = cv2.Laplacian(Ls, cv2.CV_32F, ksize=3)
+        mval = np.max(np.abs(lap)) + 1e-6
+        Ls = np.clip(Ls + lap_w * 120.0 * (lap / mval), 0, 255)
+
+    # C) CLAHE local contrast (optional)
+    clip = float(max(0.0, clahe_clip))
+    if clip > 0:
+        grid = max(2, int(clahe_grid))
+        clahe = cv2.createCLAHE(clipLimit=clip, tileGridSize=(grid, grid))
+        Ls = clahe.apply(Ls.astype(np.uint8)).astype(np.float32)
+
+    lab_sharp = cv2.merge([Ls, A, B]).astype(np.uint8)
+    sharp_l = cv2.cvtColor(lab_sharp, cv2.COLOR_LAB2BGR)
+
+    # D) Optional edge-preserving detail
+    det_w = float(np.clip(detail_strength, 0.0, 0.8))
+    if det_w > 0:
+        de = cv2.detailEnhance(sharp_l, sigma_s=10, sigma_r=0.15)
+        sharp_l = cv2.addWeighted(sharp_l, 1.0 - det_w, de, det_w, 0)
+
+    # Edge gate from ORIGINAL (padded) image to avoid boosting flats
+    gray_orig = cv2.cvtColor(img_p, cv2.COLOR_BGR2GRAY).astype(np.float32)
+    gx = cv2.Sobel(gray_orig, cv2.CV_32F, 1, 0, ksize=3)
+    gy = cv2.Sobel(gray_orig, cv2.CV_32F, 0, 1, ksize=3)
+    mag = cv2.magnitude(gx, gy)
+    mag /= (mag.max() + 1e-6)
+
+    eg = float(np.clip(edge_gamma, 0.2, 1.5))
+    gate = np.power(mag, eg)[..., None].astype(np.float32)  # HxWx1 in [0,1]
+
+    # Mix: strong edges -> sharpened; flats -> base
+    sharp_mix = (gate * sharp_l.astype(np.float32) + (1.0 - gate) * base_p.astype(np.float32)).astype(np.uint8)
+
+    # Confine enhancements to interior via alpha
+    out_p = (alpha * sharp_mix.astype(np.float32) + (1.0 - alpha) * base_p.astype(np.float32)).astype(np.uint8)
+
+    # ---- crop padding ----
+    out = out_p[p:hp - p, p:wp - p] if p > 0 else out_p
+
+    # ---- encode & respond (uses your helpers) ----
+    fmt2, media = sanitize_format(fmt)
+    ext = ".png" if fmt2 == "png" else ".webp"
+    ok, buf = cv2.imencode(ext, out)
+    if not ok:
+        raise HTTPException(500, "encode failed")
+    out_bytes = bytes(buf)
+
+    etag = _hash_for_cache(
+        raw,
+        x1=xi1, y1=yi1, x2=xi2, y2=yi2, fmt=fmt2,
+        endpoint="remove-watermark", method=m, radius=int(radius),
+        feather=int(feather or 0), pad=p, tighten=int(t),
+        sharp=float(sharp_amount), detail=float(detail_strength), lap=float(lap_boost),
+        clahe_clip=float(clahe_clip), clahe_grid=int(clahe_grid), edge_gamma=float(edge_gamma)
+    )
+    base = os.path.splitext(safe_filename(file.filename))[0]
+    headers = {
+        "Content-Disposition": f'inline; filename="{base}_no_wm.{fmt2}"',
+        "ETag": f'W/"{etag}"',
+        "Cache-Control": "public, max-age=3600",
+    }
+
+    # tidy
+    del np_in, img, img_p, inpainted, base_p, out_p, buf
+    gc.collect()
+    return Response(content=out_bytes, media_type=media, headers=headers)
 
 # -----------------------------------------------------------------------------
 if __name__ == "__main__":  # pragma: no cover
