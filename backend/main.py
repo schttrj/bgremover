@@ -56,6 +56,7 @@ app.add_middleware(
         "http://localhost:5500",
         "http://127.0.0.1:5500",
         "https://bgremover.tiiny.co",
+        "https://unwatermarker.tiiny.co",
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST"],
@@ -164,6 +165,77 @@ def _hash_for_cache(raw: bytes, **kwargs) -> str:
 
 def _parse_bool(v: Optional[bool], default: bool) -> bool:
     return default if v is None else bool(v)
+
+PRESET_CONFIG = {
+    "crisp": {
+        "method": "telea",
+        "radius": 2,
+        "feather": 1,
+        "pad": 24,
+        "tighten": 4,
+        "sharp_amount": 1.25,
+        "detail_strength": 0.0,
+        "lap_boost": 0.70,
+        "clahe_clip": 1.8,
+        "clahe_grid": 6,
+        "edge_gamma": 0.6,
+    },
+    "gentle": {
+        "method": "telea",
+        "radius": 3,
+        "feather": 2,
+        "pad": 24,
+        "tighten": 0,
+        "sharp_amount": 0.75,
+        "detail_strength": 0.15,
+        "lap_boost": 0.35,
+        "clahe_clip": 0.0,
+        "clahe_grid": 6,
+        "edge_gamma": 0.8,
+    },
+    "sharp": {
+        "method": "telea",
+        "radius": 6,
+        "feather": 5,
+        "pad": 32,
+        "tighten": 0,
+        "sharp_amount": 1.35,
+        "detail_strength": 0.50,
+        "lap_boost": 1.00,
+        "clahe_clip": 1.2,
+        "clahe_grid": 6,
+        "edge_gamma": 0.7,
+    },
+    "maxTexture": {
+        "method": "xphoto_best",
+        "radius": 4,
+        "feather": 3,
+        "pad": 32,
+        "tighten": 2,
+        "sharp_amount": 1.05,
+        "detail_strength": 0.30,
+        "lap_boost": 0.70,
+        "clahe_clip": 1.5,
+        "clahe_grid": 6,
+        "edge_gamma": 0.65,
+    },
+    "ultraSharp": {
+        "method": "telea",
+        "radius": 7,
+        "feather": 6,
+        "pad": 32,
+        "tighten": 0,
+        "sharp_amount": 1.45,
+        "detail_strength": 0.60,
+        "lap_boost": 1.00,
+        "clahe_clip": 1.8,
+        "clahe_grid": 6,
+        "edge_gamma": 0.6,
+    },
+}
+
+def _coalesce(val, default):
+    return default if (val is None) else val
 
 def _method_flag(name: str):
     name = (name or "telea").lower()
@@ -451,12 +523,12 @@ async def remove_pro(
 # -----------------------------------------------------------------------------
 # /remove-watermark : Watermark removal using OpenCV inpaint on specified region
 # -----------------------------------------------------------------------------
-@app.post("/remove-watermark", summary="Edge-safe, interior-only inpaint with edge-gated sharpening (Telea/NS/xphoto)")
+@app.post("/remove-watermark", summary="Edge-safe, interior-only inpaint with server-side presets")
 async def remove_watermark(
     request: Request,
     file: UploadFile = File(..., description="Image file"),
 
-    # Coords (float or int; will be rounded)
+    # Coords
     x1: float = Form(..., description="Top-left x"),
     y1: float = Form(..., description="Top-left y"),
     x2: float = Form(..., description="Bottom-right x"),
@@ -465,24 +537,21 @@ async def remove_watermark(
     # Output
     fmt: str = Form("png", description="png | webp"),
 
-    # Inpaint controls
-    method: str = Form("telea", description="telea | ns | xphoto_fast | xphoto_best"),
-    radius: int = Form(4, description="Telea/NS radius (px)"),
-    pad: int = Form(24, description="Edge padding (px)"),
+    # PRESET NAME (sent by frontend)
+    preset: str = Form("crisp", description="One of: crisp, gentle, sharp, maxTexture, ultraSharp"),
 
-    # Blend / sharpness controls
-    feather: int = Form(3, description="Feather width (px); 0 disables"),
-    sharp_amount: float = Form(0.85, description="L-channel unsharp amount (0.5–1.5)"),
-    detail_strength: float = Form(0.25, description="Edge-preserving detail (0–0.8)"),
-    lap_boost: float = Form(0.6, description="Laplacian micro-contrast (0–1)"),
-
-    # Interior-only inpaint: shrink mask inward to preserve edge pixels (crisper borders)
-    tighten: int = Form(3, description="Shrink rect before inpaint (px)"),
-
-    # Extra crispness: local contrast + edge-gated sharpening
-    clahe_clip: float = Form(1.8, description="CLAHE clip on L (0=off; ~1.5–2.5 good)"),
-    clahe_grid: int   = Form(6,   description="CLAHE grid size (e.g., 6–8)"),
-    edge_gamma: float = Form(0.6, description="Edge gate gamma (lower=more edge boost)"),
+    # Optional overrides (if provided, they override the chosen preset)
+    method: Optional[str] = Form(None),
+    radius: Optional[int] = Form(None),
+    pad: Optional[int] = Form(None),
+    feather: Optional[int] = Form(None),
+    tighten: Optional[int] = Form(None),
+    sharp_amount: Optional[float] = Form(None),
+    detail_strength: Optional[float] = Form(None),
+    lap_boost: Optional[float] = Form(None),
+    clahe_clip: Optional[float] = Form(None),
+    clahe_grid: Optional[int] = Form(None),
+    edge_gamma: Optional[float] = Form(None),
 ):
     raw = await file.read()
     if not raw:
@@ -492,45 +561,56 @@ async def remove_watermark(
     img = cv2.imdecode(np_in, cv2.IMREAD_COLOR)
     if img is None:
         raise HTTPException(400, "unsupported or corrupt image")
-
     h, w = img.shape[:2]
 
-    # ---- sanitize & clamp coords ----
+    # coords sanitize
     try:
         xi1, yi1, xi2, yi2 = [int(round(float(v))) for v in (x1, y1, x2, y2)]
     except Exception:
         raise HTTPException(422, "x1,y1,x2,y2 must be numeric")
-
     if xi1 >= xi2 or yi1 >= yi2:
         raise HTTPException(400, "Invalid region: require x1 < x2 and y1 < y2")
-
     xi1 = max(0, min(xi1, w - 1)); yi1 = max(0, min(yi1, h - 1))
     xi2 = max(1, min(xi2, w));     yi2 = max(1, min(yi2, h))
 
-    # ---- edge-safe padding ----
-    p = max(0, int(pad))
-    if p > 0:
-        img_p = cv2.copyMakeBorder(img, p, p, p, p, cv2.BORDER_REFLECT_101)
-        x1p, y1p, x2p, y2p = xi1 + p, yi1 + p, xi2 + p, yi2 + p
+    # resolve preset
+    p = PRESET_CONFIG.get(preset, PRESET_CONFIG["crisp"])
+
+    method      = _coalesce(method,       p["method"])
+    radius      = int(_coalesce(radius,   p["radius"]))
+    pad         = int(_coalesce(pad,      p["pad"]))
+    feather     = int(_coalesce(feather,  p["feather"]))
+    tighten     = int(_coalesce(tighten,  p["tighten"]))
+    sharp_amount= float(_coalesce(sharp_amount, p["sharp_amount"]))
+    detail_strength = float(_coalesce(detail_strength, p["detail_strength"]))
+    lap_boost   = float(_coalesce(lap_boost, p["lap_boost"]))
+    clahe_clip  = float(_coalesce(clahe_clip, p["clahe_clip"]))
+    clahe_grid  = int(_coalesce(clahe_grid, p["clahe_grid"]))
+    edge_gamma  = float(_coalesce(edge_gamma, p["edge_gamma"]))
+
+    # edge-safe padding
+    ppad = max(0, int(pad))
+    if ppad > 0:
+        img_p = cv2.copyMakeBorder(img, ppad, ppad, ppad, ppad, cv2.BORDER_REFLECT_101)
+        x1p, y1p, x2p, y2p = xi1 + ppad, yi1 + ppad, xi2 + ppad, yi2 + ppad
     else:
         img_p = img
         x1p, y1p, x2p, y2p = xi1, yi1, xi2, yi2
 
     hp, wp = img_p.shape[:2]
 
-    # ---- masks (padded space) ----
+    # masks
     mask_rect = np.zeros((hp, wp), np.uint8)
     cv2.rectangle(mask_rect, (x1p, y1p), (x2p, y2p), 255, -1)
 
-    t = max(0, int(tighten))
-    if t > 0:
-        k = 2 * t + 1
+    if tighten > 0:
+        k = 2 * tighten + 1
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
-        mask_inpaint = cv2.erode(mask_rect, kernel, iterations=1)  # interior-only inpaint
+        mask_inpaint = cv2.erode(mask_rect, kernel, iterations=1)
     else:
         mask_inpaint = mask_rect
 
-    # ---- inpainting ----
+    # inpaint
     m = method.lower()
     try:
         if m.startswith("xphoto"):
@@ -546,18 +626,17 @@ async def remove_watermark(
         logger.warning(f"inpaint failed ({e}); fallback to Telea")
         inpainted = cv2.inpaint(img_p, mask_inpaint, max(1, int(radius)), cv2.INPAINT_TELEA)
 
-    # ---- compose: replace only interior; keep edges crisp ----
-    if feather and int(feather) > 0:
-        k2 = max(1, int(feather) * 2 + 1)
+    # compose interior only
+    if feather > 0:
+        k2 = max(1, feather * 2 + 1)
         soft = cv2.GaussianBlur(mask_inpaint, (k2, k2), 0)
         alpha = (soft.astype(np.float32) / 255.0)[..., None]
     else:
         alpha = (mask_inpaint.astype(np.float32) / 255.0)[..., None]
-
     base_p = (alpha * inpainted.astype(np.float32) + (1.0 - alpha) * img_p.astype(np.float32)).astype(np.uint8)
 
-    # ---- advanced sharpening / detail (edge-gated, applied to interior only) ----
-    # A) L-channel unsharp
+    # ---- advanced sharpening / detail (edge-gated) ----
+    # A) L unsharp
     lab = cv2.cvtColor(base_p, cv2.COLOR_BGR2LAB).astype(np.float32)
     L, A, B = cv2.split(lab)
     blurL = cv2.GaussianBlur(L, (0, 0), 1.1, 1.1)
@@ -565,18 +644,17 @@ async def remove_watermark(
     Ls = cv2.addWeighted(L, 1 + amt, blurL, -amt, 0)
     Ls = np.clip(Ls, 0, 255)
 
-    # B) Laplacian micro-contrast
+    # B) Lap micro-contrast
     lap_w = float(np.clip(lap_boost, 0.0, 1.0))
     if lap_w > 0:
         lap = cv2.Laplacian(Ls, cv2.CV_32F, ksize=3)
         mval = np.max(np.abs(lap)) + 1e-6
         Ls = np.clip(Ls + lap_w * 120.0 * (lap / mval), 0, 255)
 
-    # C) CLAHE local contrast (optional)
-    clip = float(max(0.0, clahe_clip))
-    if clip > 0:
+    # C) CLAHE local contrast
+    if clahe_clip > 0:
         grid = max(2, int(clahe_grid))
-        clahe = cv2.createCLAHE(clipLimit=clip, tileGridSize=(grid, grid))
+        clahe = cv2.createCLAHE(clipLimit=clahe_clip, tileGridSize=(grid, grid))
         Ls = clahe.apply(Ls.astype(np.uint8)).astype(np.float32)
 
     lab_sharp = cv2.merge([Ls, A, B]).astype(np.uint8)
@@ -588,7 +666,7 @@ async def remove_watermark(
         de = cv2.detailEnhance(sharp_l, sigma_s=10, sigma_r=0.15)
         sharp_l = cv2.addWeighted(sharp_l, 1.0 - det_w, de, det_w, 0)
 
-    # Edge gate from ORIGINAL (padded) image to avoid boosting flats
+    # Edge gate from original (padded)
     gray_orig = cv2.cvtColor(img_p, cv2.COLOR_BGR2GRAY).astype(np.float32)
     gx = cv2.Sobel(gray_orig, cv2.CV_32F, 1, 0, ksize=3)
     gy = cv2.Sobel(gray_orig, cv2.CV_32F, 0, 1, ksize=3)
@@ -596,32 +674,26 @@ async def remove_watermark(
     mag /= (mag.max() + 1e-6)
 
     eg = float(np.clip(edge_gamma, 0.2, 1.5))
-    gate = np.power(mag, eg)[..., None].astype(np.float32)  # HxWx1 in [0,1]
+    gate = np.power(mag, eg)[..., None].astype(np.float32)
 
-    # Mix: strong edges -> sharpened; flats -> base
     sharp_mix = (gate * sharp_l.astype(np.float32) + (1.0 - gate) * base_p.astype(np.float32)).astype(np.uint8)
-
-    # Confine enhancements to interior via alpha
     out_p = (alpha * sharp_mix.astype(np.float32) + (1.0 - alpha) * base_p.astype(np.float32)).astype(np.uint8)
 
-    # ---- crop padding ----
-    out = out_p[p:hp - p, p:wp - p] if p > 0 else out_p
+    # crop padding
+    out = out_p[ppad:hp - ppad, ppad:wp - ppad] if ppad > 0 else out_p
 
-    # ---- encode & respond (uses your helpers) ----
+    # encode & respond
     fmt2, media = sanitize_format(fmt)
-    ext = ".png" if fmt2 == "png" else ".webp"
-    ok, buf = cv2.imencode(ext, out)
+    ok, buf = cv2.imencode(".png" if fmt2 == "png" else ".webp", out)
     if not ok:
         raise HTTPException(500, "encode failed")
     out_bytes = bytes(buf)
 
     etag = _hash_for_cache(
-        raw,
-        x1=xi1, y1=yi1, x2=xi2, y2=yi2, fmt=fmt2,
-        endpoint="remove-watermark", method=m, radius=int(radius),
-        feather=int(feather or 0), pad=p, tighten=int(t),
-        sharp=float(sharp_amount), detail=float(detail_strength), lap=float(lap_boost),
-        clahe_clip=float(clahe_clip), clahe_grid=int(clahe_grid), edge_gamma=float(edge_gamma)
+        raw, x1=xi1, y1=yi1, x2=xi2, y2=yi2, fmt=fmt2, endpoint="remove-watermark",
+        preset=preset, method=method, radius=radius, feather=feather, pad=ppad, tighten=tighten,
+        sharp=sharp_amount, detail=detail_strength, lap=lap_boost,
+        clahe_clip=clahe_clip, clahe_grid=clahe_grid, edge_gamma=edge_gamma
     )
     base = os.path.splitext(safe_filename(file.filename))[0]
     headers = {
@@ -630,7 +702,6 @@ async def remove_watermark(
         "Cache-Control": "public, max-age=3600",
     }
 
-    # tidy
     del np_in, img, img_p, inpainted, base_p, out_p, buf
     gc.collect()
     return Response(content=out_bytes, media_type=media, headers=headers)
