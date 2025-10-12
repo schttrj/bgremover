@@ -304,35 +304,35 @@ class BackgroundRemover {
     this.animateProcessingSteps();
 
     try {
-      // Send image to API for background removal
+      // First API call - remove-pro
       const processedImageBlob = await this.removeBackgroundAPI(file);
 
-      // Load both original and processed images in parallel
-      const [originalImg, processedImg] = await Promise.all([
+      // Second API call - remove_bg for further refinement
+      const refinedImageBlob = await this.refineWithRemoveBg(
+        processedImageBlob
+      );
+
+      // Load both original and final refined images
+      const [originalImg, refinedImg] = await Promise.all([
         this.loadImageFromFile(file),
-        this.loadImageFromBlob(processedImageBlob),
+        this.loadImageFromBlob(refinedImageBlob),
       ]);
 
       this.currentImage = originalImg;
 
       // Initialize editor with results
-      await this.setupCanvases(originalImg, processedImg);
-      this.generateMaskFromProcessed(processedImg);
+      await this.setupCanvases(originalImg, refinedImg);
+      this.generateMaskFromProcessed(refinedImg);
       this.applyMask();
       this.saveState();
 
-      // Switch to the editor view (do not toggle spinner here)
       this.showEditor();
-
-      // Set default tool to red brush for refinement
       this.setTool("red");
     } catch (error) {
       console.error("Error processing image:", error);
       alert(`Error processing image: ${error.message || error}`);
-      // On failure, return to upload view
       this.showUpload();
     } finally {
-      // Stop the spinner without changing which view is visible
       this.hideLoading();
     }
   }
@@ -375,6 +375,38 @@ class BackgroundRemover {
       if (error.name === "TypeError" && error.message.includes("fetch")) {
         throw new Error(
           "Network error. Please check your internet connection."
+        );
+      }
+      throw error;
+    }
+  }
+
+  async refineWithRemoveBg(imageBlob) {
+    const formData = new FormData();
+
+    // Convert blob to File object for the second API
+    const file = new File([imageBlob], "temp.png", { type: imageBlob.type });
+    formData.append("file", file);
+    formData.append("mode", "cutout");
+
+    try {
+      const response = await fetch(`https://phraai.com/rmbg/remove_bg`, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(
+          `Remove BG API failed: ${response.status} - ${errorText}`
+        );
+      }
+
+      return await response.blob();
+    } catch (error) {
+      if (error.name === "TypeError" && error.message.includes("fetch")) {
+        throw new Error(
+          "Network error during refinement. Please check your internet connection."
         );
       }
       throw error;
