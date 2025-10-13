@@ -304,13 +304,22 @@ class BackgroundRemover {
     this.animateProcessingSteps();
 
     try {
-      // First API call - remove-pro
-      const processedImageBlob = await this.removeBackgroundAPI(file);
+      // One server call: RMBG -> (server chains to main.py /compose) -> refined image
+      const form = new FormData();
+      form.append("file", file);
 
-      // Second API call - remove_bg for further refinement
-      const refinedImageBlob = await this.refineWithRemoveBg(
-        processedImageBlob
-      );
+      const resp = await fetch("https://phraai.com/rmbg/remove_bg_final", {
+        method: "POST",
+        body: form,
+      });
+      if (!resp.ok) {
+        const t = await resp.text();
+        throw new Error(`Remove BG (final) failed: ${resp.status} - ${t}`);
+      }
+      const refinedImageBlob = await resp.blob();
+
+      // (optional but nice) keep the full-res server result for downloads
+      this.fullResBlob = refinedImageBlob;
 
       // Load both original and final refined images
       const [originalImg, refinedImg] = await Promise.all([
@@ -1015,23 +1024,32 @@ class BackgroundRemover {
   }
 
   downloadResult() {
-    // Create a temporary canvas for the download
-    const tempCanvas = document.createElement("canvas");
-    const tempCtx = tempCanvas.getContext("2d");
-    tempCanvas.width = this.mainCanvas.width;
-    tempCanvas.height = this.mainCanvas.height;
-
-    // Copy the result with transparency
-    tempCtx.drawImage(this.mainCanvas, 0, 0);
-
-    // Download
     const fmt =
       this.formatSelect && this.formatSelect.value
         ? this.formatSelect.value
         : "png";
-    const link = document.createElement("a");
-    link.download = `background-removed.${fmt}`;
+    const filename = `background-removed.${fmt}`;
+
+    // If we have a full-res server blob, download that directly
+    if (this.fullResBlob instanceof Blob) {
+      const link = document.createElement("a");
+      link.download = filename;
+      link.href = URL.createObjectURL(this.fullResBlob);
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(link.href), 0);
+      return;
+    }
+
+    // Fallback: export the current canvas
+    const tempCanvas = document.createElement("canvas");
+    const tempCtx = tempCanvas.getContext("2d");
+    tempCanvas.width = this.mainCanvas.width;
+    tempCanvas.height = this.mainCanvas.height;
+    tempCtx.drawImage(this.mainCanvas, 0, 0);
+
     const mime = fmt === "webp" ? "image/webp" : "image/png";
+    const link = document.createElement("a");
+    link.download = filename;
     link.href = tempCanvas.toDataURL(mime);
     link.click();
   }

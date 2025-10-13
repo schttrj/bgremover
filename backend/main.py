@@ -15,6 +15,8 @@ from fastapi.responses import Response, JSONResponse, PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.security import HTTPBearer
+from fastapi import UploadFile, File
+from fastapi.responses import Response
 
 try:
     import onnxruntime as ort
@@ -72,7 +74,7 @@ app.add_middleware(
 # -----------------------------------------------------------------------------
 # Middleware: Security headers + UA blocking (with API allowlist) + Timing
 # -----------------------------------------------------------------------------
-API_ALLOW = {"/remove", "/remove-pro", "/remove-watermark", "/health", "/version"}
+API_ALLOW = {"/remove", "/remove-pro", "/remove-watermark", "/health", "/version", "/compose"}
 
 @app.middleware("http")
 async def security_headers(request: Request, call_next):
@@ -97,7 +99,7 @@ async def security_headers(request: Request, call_next):
         "script-src 'self' 'unsafe-inline'; "
         "style-src 'self' 'unsafe-inline'; "
         "img-src 'self' data: https:; "
-        "connect-src 'self' https://bgremover.tiiny.site http://localhost:5500; "
+        "connect-src 'self' https://bgremover.tiiny.co http://localhost:5500; "
         "frame-ancestors 'none';"
     )
 
@@ -519,6 +521,55 @@ async def remove_pro(
     except Exception as e:
         logger.exception("Pro processing failed")
         raise HTTPException(500, f"processing failed: {e}")
+
+# -----------------------------------------------------------------------------
+# /compose : Compose original + mask with OpenCV refinements
+# -----------------------------------------------------------------------------
+@app.post("/compose", summary="Compose original + mask with OpenCV refinements")
+async def compose(
+    original: UploadFile = File(...),
+    mask: UploadFile = File(...),
+    fmt: str = Query("png"),
+    guided: bool = Query(True),
+    feather_sigma: float = Query(0.6),
+    shrink_px: int = Query(0),
+    norm_sigma: float = Query(4.0),
+    weight_power: float = Query(1.8),
+    rim_px: int = Query(3),
+    t_power: float = Query(0.6),
+):
+    raw = await original.read()
+    mraw = await mask.read()
+    if not raw or not mraw:
+        raise HTTPException(400, "empty file(s)")
+
+    np_in = np.frombuffer(raw, np.uint8)
+    img_bgr_full = cv2.imdecode(np_in, cv2.IMREAD_COLOR)
+    if img_bgr_full is None:
+        raise HTTPException(400, "unsupported or corrupt image")
+
+    # decode mask (png L or RGBA) and resize to match original
+    m = cv2.imdecode(np.frombuffer(mraw, np.uint8), cv2.IMREAD_UNCHANGED)
+    if m is None:
+        raise HTTPException(400, "invalid mask")
+    if m.ndim == 3:
+        m = cv2.cvtColor(m, cv2.COLOR_BGR2GRAY)
+    H0, W0 = img_bgr_full.shape[:2]
+    if (m.shape[0], m.shape[1]) != (H0, W0):
+        m = cv2.resize(m, (W0, H0), interpolation=cv2.INTER_LINEAR)
+
+    # refinements you already have
+    alpha = _refine_alpha_with_cv2(img_bgr_full, m, use_guided=guided,
+                                   feather_sigma=feather_sigma, shrink_px=shrink_px)
+    alpha = _protect_interior(alpha, base_mask=m, interior_band_px=6, core_thresh=200)
+    out_bgra = _decontaminate_colors(img_bgr_full, alpha, norm_sigma=norm_sigma,
+                                     weight_power=weight_power, rim_px=rim_px, t_power=t_power)
+
+    fmt2, media = sanitize_format(fmt)
+    ok, buf = cv2.imencode(".png" if fmt2 == "png" else ".webp", out_bgra)
+    if not ok:
+        raise HTTPException(500, "encode failed")
+    return Response(content=bytes(buf), media_type=media)
 
 # -----------------------------------------------------------------------------
 # /remove-watermark : Watermark removal using OpenCV inpaint on specified region
